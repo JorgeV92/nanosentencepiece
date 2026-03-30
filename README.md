@@ -12,16 +12,12 @@ Traditional word-level tokenization breaks on unseen words and can create huge v
 
 Like SentencePiece-style tokenizers, it keeps tokenization *reversible* by making whitespace explicit with a visible marker (`▁` by default), so spaces survive encode/decode.
 
---- 
-
 ## Why this project exists
 
 `nanosentencepiece` is designed to be:
 
 - **smaller-than-SentencePiece**
 - focused on a polished **BPE-first v1**
-
----
 
 ## Features
 
@@ -61,8 +57,6 @@ Like SentencePiece-style tokenizers, it keeps tokenization *reversible* by makin
 - docs and architecture notes
 - sample corpus files
 
----
-
 ## Build instructions
 
 ```bash
@@ -73,8 +67,6 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
-
----
 
 ## Quick start
 
@@ -139,8 +131,6 @@ Possible output:
   --limit 20
 ```
 
----
-
 ## Training pipeline overview
 
 The v1 trainer is intentionally simple for version 1.
@@ -157,8 +147,6 @@ The v1 trainer is intentionally simple for version 1.
 8. Repeat until the target vocabulary size is reached or no merge meets the frequency threshold.
 9. Build a final token-id vocabulary with special tokens first.
 
----
-
 ## Encoding overview
 
 At inference time:
@@ -168,8 +156,6 @@ At inference time:
 3. Apply learned BPE merges **in deterministic training order**.
 4. Map final pieces to vocabulary ids.
 5. Use `<unk>` for pieces not found in the vocabulary.
-
----
 
 ## Decoding overview
 
@@ -186,8 +172,6 @@ Because normalization may lowercase or collapse whitespace, the round trip is be
 > **decode(encode(text)) == normalized(text)**
 
 for supported inputs in v1.
-
----
 
 ## Model format
 
@@ -226,8 +210,6 @@ A plain-text format was chosen for v1 because it is:
 - easy to diff
 - easy to debug during development
 
----
-
 ## Complexity notes
 
 ### Training
@@ -255,8 +237,6 @@ This is a good candidate for future optimization via:
 - trie-based matching
 - cached piece segmentation
 
----
-
 ## Testing
 
 The test suite covers:
@@ -273,8 +253,6 @@ Run tests with:
 ```bash
 ctest --test-dir build --output-on-failure
 ```
----
-
 
 ### Included
 - raw-text training
@@ -293,8 +271,6 @@ ctest --test-dir build --output-on-failure
 - optimized large-scale training data structures
 - every SentencePiece training option
 
----
-
 ## Future improvements
 
 Reasonable next steps include:
@@ -307,6 +283,3 @@ Reasonable next steps include:
 - benchmarking tool
 - Python bindings
 - richer Unicode normalization
-
----
-
