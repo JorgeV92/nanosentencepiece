@@ -1,0 +1,10 @@
+# Build folders
+build/
+*/build/
+cmake-build-*/
+
+# Personal notes
+notes.md
+
+# Docs folder
+docs/

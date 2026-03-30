@@ -1,0 +1,7 @@
+The quick brown fox jumps over the lazy dog.
+Tokenization is a core building block for language models.
+A small tokenizer project can still show strong engineering fundamentals.
+SentencePiece inspired designs train directly from raw text.
+Whitespace markers make decoding reversible after segmentation.
+Modern C plus plus projects benefit from clean interfaces and tests.
+This corpus is intentionally tiny and educational.
