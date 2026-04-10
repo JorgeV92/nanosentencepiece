@@ -10,6 +10,10 @@
 
 namespace nanosentencepiece {
 
+namespace detail {
+struct ProcessorUnigramIndexCache;
+}
+
 struct EncodeOptions {
   bool add_bos = false;
   bool add_eos = false;
@@ -20,6 +24,12 @@ class SentencePieceProcessor {
   SentencePieceProcessor();
   explicit SentencePieceProcessor(Model model);
   explicit SentencePieceProcessor(std::shared_ptr<const Model> model);
+  ~SentencePieceProcessor();
+
+  SentencePieceProcessor(const SentencePieceProcessor&) = default;
+  SentencePieceProcessor(SentencePieceProcessor&&) noexcept = default;
+  SentencePieceProcessor& operator=(const SentencePieceProcessor&) = default;
+  SentencePieceProcessor& operator=(SentencePieceProcessor&&) noexcept = default;
 
   static SentencePieceProcessor Load(const std::string& path);
 
@@ -41,6 +51,7 @@ class SentencePieceProcessor {
   std::vector<std::string> ApplyMerges(const std::vector<std::string>& pieces) const;
 
   std::shared_ptr<const Model> model_;
+  std::shared_ptr<const detail::ProcessorUnigramIndexCache> unigram_index_cache_;
   Normalizer normalizer_;
 };
 

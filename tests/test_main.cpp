@@ -214,6 +214,29 @@ TEST(UnigramTrainerTest, SerializationPreservesUnigramInference) {
   EXPECT_TRUE(std::filesystem::remove(path));
 }
 
+TEST(ProcessorTest, RepeatedUnigramEncodesStayStableAcrossCopies) {
+  nsp::UnigramTrainerOptions options;
+  options.vocab_size = 32;
+  options.max_piece_length = 8;
+  options.min_piece_frequency = 1;
+  options.num_iterations = 4;
+
+  nsp::UnigramTrainer trainer(options);
+  const nsp::Model model = trainer.TrainFromLines({
+      "banana bandana banana",
+      "banana band",
+      "bandana banana",
+  });
+
+  const nsp::SentencePieceProcessor processor(model);
+  const auto first = processor.EncodeToPieces("banana bandana");
+  const auto second = processor.EncodeToPieces("banana bandana");
+  EXPECT_EQ(second, first);
+
+  const nsp::SentencePieceProcessor copied = processor;
+  EXPECT_EQ(copied.EncodeToPieces("banana bandana"), first);
+}
+
 TEST(ProcessorTest, LoadsModelFromDisk) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 48;

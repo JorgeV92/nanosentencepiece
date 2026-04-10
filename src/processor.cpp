@@ -8,6 +8,14 @@
 
 namespace nanosentencepiece {
 
+namespace detail {
+
+struct ProcessorUnigramIndexCache {
+  unigram::PieceIndex index;
+};
+
+}  // namespace detail
+
 namespace {
 
 std::vector<unigram::Piece> BuildUnigramPieces(const Model& model) {
@@ -34,6 +42,16 @@ std::vector<unigram::Piece> BuildUnigramPieces(const Model& model) {
   return pieces;
 }
 
+std::shared_ptr<const detail::ProcessorUnigramIndexCache> BuildUnigramIndexCache(const Model& model) {
+  if (!model.IsUnigram()) {
+    return nullptr;
+  }
+
+  auto cache = std::make_shared<detail::ProcessorUnigramIndexCache>();
+  cache->index = unigram::BuildPieceIndex(BuildUnigramPieces(model));
+  return cache;
+}
+
 }  // namespace
 
 SentencePieceProcessor::SentencePieceProcessor()
@@ -44,11 +62,14 @@ SentencePieceProcessor::SentencePieceProcessor(Model model)
 
 SentencePieceProcessor::SentencePieceProcessor(std::shared_ptr<const Model> model)
     : model_(std::move(model)),
+      unigram_index_cache_(model_ ? BuildUnigramIndexCache(*model_) : nullptr),
       normalizer_(model_ ? model_->normalizer_options : NormalizerOptions{}) {
   if (!model_) {
     throw std::invalid_argument("model pointer must not be null");
   }
 }
+
+SentencePieceProcessor::~SentencePieceProcessor() = default;
 
 SentencePieceProcessor SentencePieceProcessor::Load(const std::string& path) {
   return SentencePieceProcessor(Model::Load(path));
@@ -97,7 +118,11 @@ std::vector<std::string> SentencePieceProcessor::EncodeToPieces(
   const std::vector<std::string> base_pieces = SplitUtf8(escaped);
 
   if (model_->IsUnigram()) {
-    const auto unigram_index = unigram::BuildPieceIndex(BuildUnigramPieces(*model_));
+    if (!unigram_index_cache_) {
+      throw std::runtime_error("unigram model is missing cached index");
+    }
+
+    const auto& unigram_index = unigram_index_cache_->index;
     const auto path = unigram::BestPath(base_pieces, unigram_index, model_->special_tokens.unk);
     const auto pieces = unigram::MaterializePieces(path, unigram_index, model_->special_tokens.unk);
     output.insert(output.end(), pieces.begin(), pieces.end());
