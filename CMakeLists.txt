@@ -19,6 +19,7 @@ add_library(nanosentencepiece
   src/normalization.cpp
   src/vocabulary.cpp
   src/model.cpp
+  src/processor.cpp
   src/bpe_trainer.cpp
   src/tokenizer.cpp
   src/cli.cpp

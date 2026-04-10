@@ -7,6 +7,7 @@
 #include "nanosentencepiece/bpe_trainer.hpp"
 #include "nanosentencepiece/model.hpp"
 #include "nanosentencepiece/normalization.hpp"
+#include "nanosentencepiece/processor.hpp"
 #include "nanosentencepiece/tokenizer.hpp"
 
 namespace nsp = nanosentencepiece;
@@ -106,6 +107,35 @@ void TestUnknownFallback() {
   Expect(saw_unk, "unknown characters should map to <unk>");
 }
 
+void TestProcessorMatchesTokenizer() {
+  nsp::BpeTrainerOptions options;
+  options.vocab_size = 64;
+  options.min_pair_frequency = 1;
+
+  nsp::BpeTrainer trainer(options);
+  const nsp::Model model = trainer.TrainFromLines({
+      "processor api parity",
+      "tokenizer compatibility check",
+      "shared model path",
+  });
+
+  const auto shared_model = std::make_shared<const nsp::Model>(model);
+  const nsp::SentencePieceProcessor processor(shared_model);
+  const nsp::Tokenizer tokenizer(model);
+
+  const auto processor_pieces =
+      processor.EncodeToPieces("processor api parity", nsp::EncodeOptions{true, true});
+  const auto tokenizer_pieces = tokenizer.EncodeToPieces("processor api parity", true, true);
+  Expect(processor_pieces == tokenizer_pieces, "processor pieces should match tokenizer pieces");
+
+  const auto processor_ids =
+      processor.EncodeToIds("tokenizer compatibility check", nsp::EncodeOptions{true, true});
+  const auto tokenizer_ids = tokenizer.EncodeToIds("tokenizer compatibility check", true, true);
+  Expect(processor_ids == tokenizer_ids, "processor ids should match tokenizer ids");
+
+  Expect(processor.model_ptr().get() == shared_model.get(), "processor should retain shared model");
+}
+
 void TestSerialization() {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 48;
@@ -123,6 +153,23 @@ void TestSerialization() {
   ExpectEq(ids.back(), loaded.vocabulary.eos_id(), "EOS id should be stable after load");
 }
 
+void TestProcessorLoad() {
+  nsp::BpeTrainerOptions options;
+  options.vocab_size = 48;
+  options.min_pair_frequency = 1;
+
+  nsp::BpeTrainer trainer(options);
+  nsp::Model model = trainer.TrainFromLines({"load through processor", "decode through processor"});
+  const std::string path = "nsp_test_processor_model.nsp";
+  model.Save(path);
+
+  const nsp::SentencePieceProcessor processor = nsp::SentencePieceProcessor::Load(path);
+  const auto pieces = processor.EncodeToPieces("load through processor", nsp::EncodeOptions{true, true});
+  Expect(!pieces.empty(), "processor load should produce pieces");
+  ExpectEq(processor.DecodePieces(pieces), "load through processor",
+           "processor decode should round-trip normalized text");
+}
+
 }  // namespace
 
 int main() {
@@ -131,7 +178,9 @@ int main() {
       {"TestBpeLearnsAbMerge", TestBpeLearnsAbMerge},
       {"TestRoundTrip", TestRoundTrip},
       {"TestUnknownFallback", TestUnknownFallback},
+      {"TestProcessorMatchesTokenizer", TestProcessorMatchesTokenizer},
       {"TestSerialization", TestSerialization},
+      {"TestProcessorLoad", TestProcessorLoad},
   };
 
   int failures = 0;
