@@ -1,6 +1,7 @@
 # Build folders
 build/
 */build/
+build-*/
 cmake-build-*/
 
 # Personal notes

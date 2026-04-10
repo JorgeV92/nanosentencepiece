@@ -2,12 +2,11 @@
 
 #include <algorithm>
 #include <fstream>
-#include <limits>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -19,13 +18,39 @@ namespace nanosentencepiece {
 
 namespace {
 
+using SymbolId = std::uint32_t;
+
 struct Sequence {
-  std::vector<std::string> symbols;
+  std::vector<SymbolId> symbols;
+};
+
+class SymbolTable {
+ public:
+  SymbolId Intern(const std::string& symbol) {
+    if (const auto it = symbol_to_id_.find(symbol); it != symbol_to_id_.end()) {
+      return it->second;
+    }
+
+    const SymbolId id = static_cast<SymbolId>(symbols_.size());
+    symbols_.push_back(symbol);
+    symbol_to_id_.emplace(symbols_.back(), id);
+    return id;
+  }
+
+  const std::string& Symbol(SymbolId id) const {
+    return symbols_.at(static_cast<std::size_t>(id));
+  }
+
+  std::size_t Size() const noexcept { return symbols_.size(); }
+
+ private:
+  std::vector<std::string> symbols_;
+  std::unordered_map<std::string, SymbolId> symbol_to_id_;
 };
 
 struct PairKey {
-  std::string left;
-  std::string right;
+  SymbolId left = 0;
+  SymbolId right = 0;
 
   bool operator==(const PairKey& other) const {
     return left == other.left && right == other.right;
@@ -34,7 +59,8 @@ struct PairKey {
 
 struct PairKeyHash {
   std::size_t operator()(const PairKey& key) const {
-    return std::hash<std::string>{}(key.left) ^ (std::hash<std::string>{}(key.right) << 1U);
+    return (static_cast<std::size_t>(key.left) * 1'000'003ULL) ^
+           static_cast<std::size_t>(key.right);
   }
 };
 
@@ -62,7 +88,7 @@ std::vector<std::string> ReadAllLines(const std::vector<std::string>& paths) {
 std::vector<Sequence> BuildSequences(
     const std::vector<std::string>& lines,
     const Normalizer& normalizer,
-    std::unordered_set<std::string>* symbol_set) {
+    SymbolTable* symbol_table) {
   std::vector<Sequence> sequences;
   sequences.reserve(lines.size());
 
@@ -72,13 +98,15 @@ std::vector<Sequence> BuildSequences(
       continue;
     }
 
-    Sequence sequence{SplitUtf8(escaped)};
-    if (sequence.symbols.empty()) {
+    const std::vector<std::string> pieces = SplitUtf8(escaped);
+    if (pieces.empty()) {
       continue;
     }
 
-    for (const auto& symbol : sequence.symbols) {
-      symbol_set->insert(symbol);
+    Sequence sequence;
+    sequence.symbols.reserve(pieces.size());
+    for (const auto& symbol : pieces) {
+      sequence.symbols.push_back(symbol_table->Intern(symbol));
     }
 
     sequences.push_back(std::move(sequence));
@@ -87,33 +115,53 @@ std::vector<Sequence> BuildSequences(
   return sequences;
 }
 
+std::size_t CountAdjacentPairs(const std::vector<Sequence>& sequences) {
+  std::size_t total = 0;
+  for (const auto& sequence : sequences) {
+    if (sequence.symbols.size() >= 2) {
+      total += sequence.symbols.size() - 1;
+    }
+  }
+  return total;
+}
+
 std::unordered_map<PairKey, std::size_t, PairKeyHash> CountPairs(const std::vector<Sequence>& sequences) {
   std::unordered_map<PairKey, std::size_t, PairKeyHash> counts;
+  counts.reserve(CountAdjacentPairs(sequences));
+
   for (const auto& sequence : sequences) {
     if (sequence.symbols.size() < 2) {
       continue;
     }
 
     for (std::size_t i = 0; i + 1 < sequence.symbols.size(); ++i) {
-      PairKey key{sequence.symbols[i], sequence.symbols[i + 1]};
+      const PairKey key{sequence.symbols[i], sequence.symbols[i + 1]};
       counts[key] += 1;
     }
   }
   return counts;
 }
 
-bool BetterPair(const PairStats& candidate, const PairStats& incumbent) {
+bool BetterPair(
+    const PairStats& candidate,
+    const PairStats& incumbent,
+    const SymbolTable& symbol_table) {
   if (candidate.frequency != incumbent.frequency) {
     return candidate.frequency > incumbent.frequency;
   }
-  if (candidate.pair.left != incumbent.pair.left) {
-    return candidate.pair.left < incumbent.pair.left;
+
+  const std::string& candidate_left = symbol_table.Symbol(candidate.pair.left);
+  const std::string& incumbent_left = symbol_table.Symbol(incumbent.pair.left);
+  if (candidate_left != incumbent_left) {
+    return candidate_left < incumbent_left;
   }
-  return candidate.pair.right < incumbent.pair.right;
+
+  return symbol_table.Symbol(candidate.pair.right) < symbol_table.Symbol(incumbent.pair.right);
 }
 
 PairStats FindBestPair(
     const std::unordered_map<PairKey, std::size_t, PairKeyHash>& counts,
+    const SymbolTable& symbol_table,
     std::size_t min_pair_frequency) {
   PairStats best;
   for (const auto& [pair, frequency] : counts) {
@@ -122,14 +170,14 @@ PairStats FindBestPair(
     }
 
     PairStats candidate{pair, frequency};
-    if (best.frequency == 0 || BetterPair(candidate, best)) {
+    if (best.frequency == 0 || BetterPair(candidate, best, symbol_table)) {
       best = std::move(candidate);
     }
   }
   return best;
 }
 
-bool ApplyMerge(std::vector<Sequence>* sequences, const PairKey& pair, const std::string& merged) {
+bool ApplyMerge(std::vector<Sequence>* sequences, const PairKey& pair, SymbolId merged_id) {
   bool changed = false;
 
   for (auto& sequence : *sequences) {
@@ -137,14 +185,14 @@ bool ApplyMerge(std::vector<Sequence>* sequences, const PairKey& pair, const std
       continue;
     }
 
-    std::vector<std::string> next;
+    std::vector<SymbolId> next;
     next.reserve(sequence.symbols.size());
 
     for (std::size_t i = 0; i < sequence.symbols.size();) {
       if (i + 1 < sequence.symbols.size() &&
           sequence.symbols[i] == pair.left &&
           sequence.symbols[i + 1] == pair.right) {
-        next.push_back(merged);
+        next.push_back(merged_id);
         i += 2;
         changed = true;
       } else {
@@ -159,8 +207,14 @@ bool ApplyMerge(std::vector<Sequence>* sequences, const PairKey& pair, const std
   return changed;
 }
 
-std::vector<std::string> SortedSymbols(const std::unordered_set<std::string>& symbols) {
-  std::vector<std::string> values(symbols.begin(), symbols.end());
+std::vector<std::string> SortedBaseSymbols(
+    const SymbolTable& symbol_table,
+    std::size_t base_symbol_count) {
+  std::vector<std::string> values;
+  values.reserve(base_symbol_count);
+  for (std::size_t i = 0; i < base_symbol_count; ++i) {
+    values.push_back(symbol_table.Symbol(static_cast<SymbolId>(i)));
+  }
   std::sort(values.begin(), values.end());
   return values;
 }
@@ -185,25 +239,28 @@ Model BpeTrainer::TrainFromLines(const std::vector<std::string>& lines) const {
 
   const Normalizer normalizer(options_.normalizer_options);
 
-  std::unordered_set<std::string> symbol_set;
-  std::vector<Sequence> sequences = BuildSequences(lines, normalizer, &symbol_set);
+  SymbolTable symbol_table;
+  std::vector<Sequence> sequences = BuildSequences(lines, normalizer, &symbol_table);
+  const std::size_t base_symbol_count = symbol_table.Size();
 
   Vocabulary vocab = Vocabulary::WithSpecialTokens(options_.special_tokens);
 
-  for (const auto& symbol : SortedSymbols(symbol_set)) {
+  for (const auto& symbol : SortedBaseSymbols(symbol_table, base_symbol_count)) {
     vocab.AddPiece(symbol);
   }
 
   std::size_t next_rank = 0;
   while (vocab.Size() < options_.vocab_size) {
     const auto pair_counts = CountPairs(sequences);
-    const PairStats best = FindBestPair(pair_counts, options_.min_pair_frequency);
+    const PairStats best = FindBestPair(pair_counts, symbol_table, options_.min_pair_frequency);
     if (best.frequency == 0) {
       break;
     }
 
-    const std::string merged = best.pair.left + best.pair.right;
-    if (!ApplyMerge(&sequences, best.pair, merged)) {
+    const std::string merged =
+        symbol_table.Symbol(best.pair.left) + symbol_table.Symbol(best.pair.right);
+    const SymbolId merged_id = symbol_table.Intern(merged);
+    if (!ApplyMerge(&sequences, best.pair, merged_id)) {
       break;
     }
 
@@ -214,8 +271,8 @@ Model BpeTrainer::TrainFromLines(const std::vector<std::string>& lines) const {
     }
 
     MergeRule merge;
-    merge.left = best.pair.left;
-    merge.right = best.pair.right;
+    merge.left = symbol_table.Symbol(best.pair.left);
+    merge.right = symbol_table.Symbol(best.pair.right);
     merge.merged = merged;
     merge.rank = next_rank++;
     model.merges.push_back(std::move(merge));

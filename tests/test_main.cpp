@@ -1,6 +1,6 @@
-#include <functional>
-#include <iostream>
-#include <stdexcept>
+#include <gtest/gtest.h>
+
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -14,46 +14,27 @@ namespace nsp = nanosentencepiece;
 
 namespace {
 
-struct TestFailure : std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
-
-void Expect(bool condition, const std::string& message) {
-  if (!condition) {
-    throw TestFailure(message);
-  }
+std::string TempModelPath(const std::string& filename) {
+  return (std::filesystem::temp_directory_path() / filename).string();
 }
 
-void ExpectEq(const std::string& actual, const std::string& expected, const std::string& message) {
-  if (actual != expected) {
-    throw TestFailure(message + " | expected=\"" + expected + "\" actual=\"" + actual + "\"");
-  }
-}
-
-void ExpectEq(int actual, int expected, const std::string& message) {
-  if (actual != expected) {
-    throw TestFailure(message + " | expected=" + std::to_string(expected) +
-                      " actual=" + std::to_string(actual));
-  }
-}
-
-void TestNormalization() {
+TEST(NormalizationTest, AppliesAsciiNormalizationAndWhitespaceEscaping) {
   nsp::NormalizerOptions options;
   options.lowercase = true;
   options.collapse_whitespace = true;
   nsp::Normalizer normalizer(options);
 
   const std::string normalized = normalizer.Normalize("  HeLLo\t\tWORLD  ");
-  ExpectEq(normalized, "hello world", "ascii lowercase + whitespace collapse");
+  EXPECT_EQ(normalized, "hello world");
 
   const std::string escaped = normalizer.EscapeWhitespace(normalized);
-  ExpectEq(escaped, "▁hello▁world", "whitespace should be reversible");
+  EXPECT_EQ(escaped, "▁hello▁world");
 
   const std::string restored = normalizer.RestoreWhitespace(escaped);
-  ExpectEq(restored, "hello world", "restored text should match normalized text");
+  EXPECT_EQ(restored, "hello world");
 }
 
-void TestBpeLearnsAbMerge() {
+TEST(BpeTrainerTest, LearnsMostFrequentMerge) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 16;
   options.min_pair_frequency = 2;
@@ -63,11 +44,28 @@ void TestBpeLearnsAbMerge() {
 
   nsp::BpeTrainer trainer(options);
   const nsp::Model model = trainer.TrainFromLines({"abab", "abab"});
-  Expect(!model.merges.empty(), "trainer should learn at least one merge");
-  ExpectEq(model.merges.front().merged, "ab", "first merge should be ab");
+  ASSERT_FALSE(model.merges.empty());
+  EXPECT_EQ(model.merges.front().merged, "ab");
 }
 
-void TestRoundTrip() {
+TEST(BpeTrainerTest, PreservesLexicographicTieBreaks) {
+  nsp::BpeTrainerOptions options;
+  options.vocab_size = 16;
+  options.min_pair_frequency = 1;
+  options.normalizer_options.lowercase = false;
+  options.normalizer_options.collapse_whitespace = false;
+  options.normalizer_options.add_dummy_prefix = false;
+
+  nsp::BpeTrainer trainer(options);
+  const nsp::Model model = trainer.TrainFromLines({"ab", "ac"});
+
+  ASSERT_FALSE(model.merges.empty());
+  EXPECT_EQ(model.merges.front().left, "a");
+  EXPECT_EQ(model.merges.front().right, "b");
+  EXPECT_EQ(model.merges.front().merged, "ab");
+}
+
+TEST(TokenizerTest, RoundTripsNormalizedText) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 64;
   options.min_pair_frequency = 1;
@@ -82,10 +80,10 @@ void TestRoundTrip() {
   nsp::Tokenizer tokenizer(model);
   const auto pieces = tokenizer.EncodeToPieces("Hello   world", true, true);
   const std::string decoded = tokenizer.DecodePieces(pieces);
-  ExpectEq(decoded, "hello world", "decode should round-trip normalized text");
+  EXPECT_EQ(decoded, "hello world");
 }
 
-void TestUnknownFallback() {
+TEST(TokenizerTest, FallsBackToUnknownPiece) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 32;
   options.min_pair_frequency = 1;
@@ -104,10 +102,10 @@ void TestUnknownFallback() {
       break;
     }
   }
-  Expect(saw_unk, "unknown characters should map to <unk>");
+  EXPECT_TRUE(saw_unk);
 }
 
-void TestProcessorMatchesTokenizer() {
+TEST(ProcessorTest, MatchesTokenizerBehaviorAndRetainsSharedModel) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 64;
   options.min_pair_frequency = 1;
@@ -126,79 +124,55 @@ void TestProcessorMatchesTokenizer() {
   const auto processor_pieces =
       processor.EncodeToPieces("processor api parity", nsp::EncodeOptions{true, true});
   const auto tokenizer_pieces = tokenizer.EncodeToPieces("processor api parity", true, true);
-  Expect(processor_pieces == tokenizer_pieces, "processor pieces should match tokenizer pieces");
+  EXPECT_EQ(processor_pieces, tokenizer_pieces);
 
   const auto processor_ids =
       processor.EncodeToIds("tokenizer compatibility check", nsp::EncodeOptions{true, true});
   const auto tokenizer_ids = tokenizer.EncodeToIds("tokenizer compatibility check", true, true);
-  Expect(processor_ids == tokenizer_ids, "processor ids should match tokenizer ids");
+  EXPECT_EQ(processor_ids, tokenizer_ids);
 
-  Expect(processor.model_ptr().get() == shared_model.get(), "processor should retain shared model");
+  EXPECT_EQ(processor.model_ptr().get(), shared_model.get());
 }
 
-void TestSerialization() {
+TEST(ModelTest, SerializationPreservesSpecialIds) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 48;
   options.min_pair_frequency = 1;
 
   nsp::BpeTrainer trainer(options);
   nsp::Model model = trainer.TrainFromLines({"serialize me", "and load me back"});
-  const std::string path = "nsp_test_model.nsp";
+  const std::string path = TempModelPath("nsp_test_model.nsp");
   model.Save(path);
 
   const nsp::Model loaded = nsp::Model::Load(path);
   nsp::Tokenizer tokenizer(loaded);
   const auto ids = tokenizer.EncodeToIds("serialize me", true, true);
-  ExpectEq(ids.front(), loaded.vocabulary.bos_id(), "BOS id should be stable after load");
-  ExpectEq(ids.back(), loaded.vocabulary.eos_id(), "EOS id should be stable after load");
+  ASSERT_FALSE(ids.empty());
+  EXPECT_EQ(ids.front(), loaded.vocabulary.bos_id());
+  EXPECT_EQ(ids.back(), loaded.vocabulary.eos_id());
+  EXPECT_TRUE(std::filesystem::remove(path));
 }
 
-void TestProcessorLoad() {
+TEST(ProcessorTest, LoadsModelFromDisk) {
   nsp::BpeTrainerOptions options;
   options.vocab_size = 48;
   options.min_pair_frequency = 1;
 
   nsp::BpeTrainer trainer(options);
   nsp::Model model = trainer.TrainFromLines({"load through processor", "decode through processor"});
-  const std::string path = "nsp_test_processor_model.nsp";
+  const std::string path = TempModelPath("nsp_test_processor_model.nsp");
   model.Save(path);
 
   const nsp::SentencePieceProcessor processor = nsp::SentencePieceProcessor::Load(path);
   const auto pieces = processor.EncodeToPieces("load through processor", nsp::EncodeOptions{true, true});
-  Expect(!pieces.empty(), "processor load should produce pieces");
-  ExpectEq(processor.DecodePieces(pieces), "load through processor",
-           "processor decode should round-trip normalized text");
+  EXPECT_FALSE(pieces.empty());
+  EXPECT_EQ(processor.DecodePieces(pieces), "load through processor");
+  EXPECT_TRUE(std::filesystem::remove(path));
 }
 
 }  // namespace
 
-int main() {
-  const std::vector<std::pair<std::string, std::function<void()>>> tests = {
-      {"TestNormalization", TestNormalization},
-      {"TestBpeLearnsAbMerge", TestBpeLearnsAbMerge},
-      {"TestRoundTrip", TestRoundTrip},
-      {"TestUnknownFallback", TestUnknownFallback},
-      {"TestProcessorMatchesTokenizer", TestProcessorMatchesTokenizer},
-      {"TestSerialization", TestSerialization},
-      {"TestProcessorLoad", TestProcessorLoad},
-  };
-
-  int failures = 0;
-  for (const auto& [name, test] : tests) {
-    try {
-      test();
-      std::cout << "[PASS] " << name << "\n";
-    } catch (const std::exception& ex) {
-      ++failures;
-      std::cerr << "[FAIL] " << name << ": " << ex.what() << "\n";
-    }
-  }
-
-  if (failures > 0) {
-    std::cerr << failures << " test(s) failed\n";
-    return 1;
-  }
-
-  std::cout << "all tests passed\n";
-  return 0;
+int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }

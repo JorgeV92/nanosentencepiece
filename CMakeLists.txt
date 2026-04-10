@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(NSP_BUILD_TESTS "Build nanosentencepiece tests" ON)
 option(NSP_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+option(NSP_USE_GTEST "Use GoogleTest for nanosentencepiece tests" ON)
 
 add_library(nanosentencepiece
   src/utf8.cpp
@@ -59,10 +60,21 @@ target_link_libraries(nsp_inspect PRIVATE nanosentencepiece)
 if (NSP_BUILD_TESTS)
   enable_testing()
 
-  add_executable(nanosentencepiece_tests
-    tests/test_main.cpp
-  )
+  add_executable(nanosentencepiece_tests tests/test_main.cpp)
   target_link_libraries(nanosentencepiece_tests PRIVATE nanosentencepiece)
 
-  add_test(NAME nanosentencepiece_tests COMMAND nanosentencepiece_tests)
+  if (NSP_USE_GTEST)
+    find_package(GTest REQUIRED)
+    include(GoogleTest)
+    target_link_libraries(nanosentencepiece_tests PRIVATE GTest::gtest)
+    set_property(
+      TARGET nanosentencepiece_tests
+      APPEND
+      PROPERTY BUILD_RPATH
+      "$<TARGET_FILE_DIR:GTest::gtest>"
+    )
+    gtest_discover_tests(nanosentencepiece_tests)
+  else()
+    add_test(NAME nanosentencepiece_tests COMMAND nanosentencepiece_tests)
+  endif()
 endif()
