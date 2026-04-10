@@ -4,8 +4,37 @@
 #include <utility>
 
 #include "nanosentencepiece/utf8.hpp"
+#include "unigram_utils.hpp"
 
 namespace nanosentencepiece {
+
+namespace {
+
+std::vector<unigram::Piece> BuildUnigramPieces(const Model& model) {
+  std::vector<unigram::Piece> pieces;
+  pieces.reserve(model.vocabulary.Size());
+
+  for (std::size_t id = 0; id < model.vocabulary.Pieces().size(); ++id) {
+    const int piece_id = static_cast<int>(id);
+    if (piece_id == model.vocabulary.unk_id() ||
+        piece_id == model.vocabulary.bos_id() ||
+        piece_id == model.vocabulary.eos_id() ||
+        piece_id == model.vocabulary.pad_id()) {
+      continue;
+    }
+
+    unigram::Piece piece;
+    piece.piece = model.vocabulary.Pieces()[id];
+    piece.symbols = SplitUtf8(piece.piece);
+    piece.score = model.PieceScoreForId(piece_id);
+    piece.external_index = id;
+    pieces.push_back(std::move(piece));
+  }
+
+  return pieces;
+}
+
+}  // namespace
 
 SentencePieceProcessor::SentencePieceProcessor()
     : SentencePieceProcessor(std::make_shared<Model>()) {}
@@ -66,13 +95,21 @@ std::vector<std::string> SentencePieceProcessor::EncodeToPieces(
 
   const std::string escaped = normalizer_.NormalizeAndEscape(text);
   const std::vector<std::string> base_pieces = SplitUtf8(escaped);
-  const std::vector<std::string> merged_pieces = ApplyMerges(base_pieces);
 
-  for (const auto& piece : merged_pieces) {
-    if (model_->vocabulary.Contains(piece)) {
-      output.push_back(piece);
-    } else {
-      output.push_back(model_->special_tokens.unk);
+  if (model_->IsUnigram()) {
+    const auto unigram_index = unigram::BuildPieceIndex(BuildUnigramPieces(*model_));
+    const auto path = unigram::BestPath(base_pieces, unigram_index, model_->special_tokens.unk);
+    const auto pieces = unigram::MaterializePieces(path, unigram_index, model_->special_tokens.unk);
+    output.insert(output.end(), pieces.begin(), pieces.end());
+  } else {
+    const std::vector<std::string> merged_pieces = ApplyMerges(base_pieces);
+
+    for (const auto& piece : merged_pieces) {
+      if (model_->vocabulary.Contains(piece)) {
+        output.push_back(piece);
+      } else {
+        output.push_back(model_->special_tokens.unk);
+      }
     }
   }
 

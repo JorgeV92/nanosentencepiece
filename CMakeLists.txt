@@ -22,6 +22,7 @@ add_library(nanosentencepiece
   src/model.cpp
   src/processor.cpp
   src/bpe_trainer.cpp
+  src/unigram_trainer.cpp
   src/tokenizer.cpp
   src/cli.cpp
 )

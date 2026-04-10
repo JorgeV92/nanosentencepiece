@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -9,6 +10,14 @@
 #include "nanosentencepiece/vocabulary.hpp"
 
 namespace nanosentencepiece {
+
+enum class ModelType {
+  kBpe,
+  kUnigram,
+};
+
+std::string ToString(ModelType model_type);
+ModelType ModelTypeFromString(std::string_view value);
 
 struct MergeRule {
   std::string left;
@@ -19,7 +28,8 @@ struct MergeRule {
 
 struct ModelMetadata {
   std::string format = "NSPM";
-  std::string version = "1";
+  std::string version = "2";
+  ModelType model_type = ModelType::kBpe;
   std::size_t trained_vocab_size = 0;
 };
 
@@ -34,10 +44,14 @@ class Model {
 
   std::size_t MergeRank(const std::string& merged_piece) const;
   bool HasMerge(const std::string& merged_piece) const;
+  double PieceScoreForId(int id) const;
+  double PieceScore(std::string_view piece) const;
+  bool IsUnigram() const noexcept;
 
   NormalizerOptions normalizer_options;
   SpecialTokens special_tokens;
   Vocabulary vocabulary;
+  std::vector<double> piece_scores;
   std::vector<MergeRule> merges;
   ModelMetadata metadata;
 

@@ -9,6 +9,7 @@
 #include "nanosentencepiece/normalization.hpp"
 #include "nanosentencepiece/processor.hpp"
 #include "nanosentencepiece/tokenizer.hpp"
+#include "nanosentencepiece/unigram_trainer.hpp"
 
 namespace nsp = nanosentencepiece;
 
@@ -150,6 +151,66 @@ TEST(ModelTest, SerializationPreservesSpecialIds) {
   ASSERT_FALSE(ids.empty());
   EXPECT_EQ(ids.front(), loaded.vocabulary.bos_id());
   EXPECT_EQ(ids.back(), loaded.vocabulary.eos_id());
+  EXPECT_TRUE(std::filesystem::remove(path));
+}
+
+TEST(UnigramTrainerTest, TrainsUnigramModelAndRoundTripsText) {
+  nsp::UnigramTrainerOptions options;
+  options.vocab_size = 32;
+  options.max_piece_length = 8;
+  options.min_piece_frequency = 1;
+  options.num_iterations = 4;
+
+  nsp::UnigramTrainer trainer(options);
+  const nsp::Model model = trainer.TrainFromLines({
+      "banana bandana banana",
+      "banana band",
+      "bandana banana",
+  });
+
+  EXPECT_EQ(model.metadata.model_type, nsp::ModelType::kUnigram);
+  EXPECT_TRUE(model.IsUnigram());
+  EXPECT_TRUE(model.merges.empty());
+
+  nsp::SentencePieceProcessor processor(model);
+  const auto pieces = processor.EncodeToPieces("banana bandana", nsp::EncodeOptions{true, true});
+  EXPECT_FALSE(pieces.empty());
+  EXPECT_EQ(processor.DecodePieces(pieces), "banana bandana");
+
+  std::size_t unk_count = 0;
+  for (const auto& piece : pieces) {
+    if (piece == model.special_tokens.unk) {
+      ++unk_count;
+    }
+  }
+  EXPECT_EQ(unk_count, 0U);
+}
+
+TEST(UnigramTrainerTest, SerializationPreservesUnigramInference) {
+  nsp::UnigramTrainerOptions options;
+  options.vocab_size = 24;
+  options.max_piece_length = 6;
+  options.min_piece_frequency = 1;
+  options.num_iterations = 3;
+
+  nsp::UnigramTrainer trainer(options);
+  nsp::Model model = trainer.TrainFromLines({
+      "lowest low",
+      "lower lowest",
+      "low low lower",
+  });
+
+  const nsp::SentencePieceProcessor before_processor(model);
+  const auto before = before_processor.EncodeToPieces("lowest low");
+
+  const std::string path = TempModelPath("nsp_test_unigram_model.nsp");
+  model.Save(path);
+
+  const nsp::Model loaded = nsp::Model::Load(path);
+  const nsp::SentencePieceProcessor after_processor(loaded);
+  EXPECT_EQ(loaded.metadata.model_type, nsp::ModelType::kUnigram);
+  EXPECT_EQ(after_processor.EncodeToPieces("lowest low"), before);
+  EXPECT_EQ(after_processor.DecodePieces(before), "lowest low");
   EXPECT_TRUE(std::filesystem::remove(path));
 }
 

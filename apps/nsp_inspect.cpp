@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
                                   : 32;
 
     std::cout << "model format: " << model.metadata.format << " v" << model.metadata.version << "\n";
+    std::cout << "model type: " << nsp::ToString(model.metadata.model_type) << "\n";
     std::cout << "trained vocab size target: " << model.metadata.trained_vocab_size << "\n";
     std::cout << "actual vocab size: " << model.vocabulary.Size() << "\n";
     std::cout << "merge count: " << model.merges.size() << "\n";
@@ -48,11 +49,19 @@ int main(int argc, char** argv) {
       std::cout << "  [" << i << "] " << pieces[i] << "\n";
     }
 
-    std::cout << "\nmerge preview:\n";
-    for (std::size_t i = 0; i < std::min(limit, model.merges.size()); ++i) {
-      const auto& merge = model.merges[i];
-      std::cout << "  #" << merge.rank << ": (" << merge.left << ", " << merge.right
-                << ") -> " << merge.merged << "\n";
+    if (model.IsUnigram()) {
+      std::cout << "\nunigram piece scores:\n";
+      for (std::size_t i = 0; i < std::min(limit, pieces.size()); ++i) {
+        std::cout << "  [" << i << "] " << pieces[i]
+                  << " score=" << model.PieceScoreForId(static_cast<int>(i)) << "\n";
+      }
+    } else {
+      std::cout << "\nmerge preview:\n";
+      for (std::size_t i = 0; i < std::min(limit, model.merges.size()); ++i) {
+        const auto& merge = model.merges[i];
+        std::cout << "  #" << merge.rank << ": (" << merge.left << ", " << merge.right
+                  << ") -> " << merge.merged << "\n";
+      }
     }
 
     return 0;
