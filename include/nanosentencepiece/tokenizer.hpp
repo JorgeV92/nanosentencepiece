@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "nanosentencepiece/model.hpp"
-#include "nanosentencepiece/normalization.hpp"
+#include "nanosentencepiece/processor.hpp"
 
 namespace nanosentencepiece {
 
@@ -29,10 +29,7 @@ class Tokenizer {
   const Model& model() const noexcept;
 
  private:
-  std::vector<std::string> ApplyMerges(const std::vector<std::string>& pieces) const;
-
-  Model model_;
-  Normalizer normalizer_;
+  SentencePieceProcessor processor_;
 };
 
 }  // namespace nanosentencepiece
